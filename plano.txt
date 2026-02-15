@@ -1,0 +1,49 @@
+BITFINEX
+GATE.IO
+BINANCE
+KUCOIN
+BITMEX
+BYBIT
+KRAKEN
+COIN BASE
+
+🚀 MODELO 3 — O ÚNICO que faz sentido pra você
+“Cross-exchange smart execution”
+
+(é isso que a Agnus faz)
+
+Você:
+
+Tem USDT em uma exchange só
+
+O bot:
+
+Compra BTC
+
+Vende BTC quase ao mesmo tempo
+
+Fecha tudo no mesmo ciclo
+
+Como isso é possível?
+
+Com:
+
+ordens limit
+
+checagem de liquidez
+
+timeout
+
+rollback
+
+👉 Se uma perna falhar, a outra não executa
+
+📌 A exposição dura milissegundos, não minutos.
+
+1. Lê order book das duas exchanges
+2. Calcula spread REAL (taxas + slippage)
+3. Verifica saldo
+4. Cria duas ordens LIMIT
+5. Envia quase simultâneo
+6. Se uma falhar → cancela a outra
+7. Fecha ciclo
