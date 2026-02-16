@@ -13,6 +13,7 @@ from simulator.wallet import Wallet
 from core.pnl_engine import PnLEngine
 from core.orderbook import OrderBook
 from core.stats_engine import StatsEngine
+from core.price_store import price_store
 
 
 
@@ -65,28 +66,58 @@ if __name__ == "__main__":
     # ======================
     # Main Loop
     # ======================
-    while True:
-        trade = None
-        hedge_trade = None
+    # ======================
+    # Main Loop (Limpo)
+    # ======================
+    last_heartbeat = time.time()
 
+    while True:
+        # --- SINCRONIZAÇÃO PRICE_STORE -> ORDERBOOK ---
+        # (Mantendo a correção que fizemos antes)
+        snapshot = price_store.get_snapshot()
+        if "BTCUSDT" in snapshot:
+            for exchange_name, data in snapshot["BTCUSDT"].items():
+                ex_upper = exchange_name.upper()
+                if ex_upper in ["BINANCE", "BYBIT", "COINBASE"]:
+                    orderbook.update(
+                        exchange=ex_upper,
+                        bid=data['bid'],
+                        ask=data['ask'],
+                        bid_qty=0.5,
+                        ask_qty=0.5
+                    )
+        # -----------------------------------------------
+
+        # 1. Avalia Arbitragem
         intent = engine.evaluate()
 
         if intent:
+            # Tenta executar
             trade = trader.handle_intent(intent)
 
             if trade:
+                # SUCESSO
                 inventory.apply_trade(
                     exchange=trade["exchange"],
                     side=trade["side"],
                     qty=trade["filled_qty"]
                 )
-
                 stats.record_trade(trade)
+                
+                # Imprime Detalhes COMPLETOS apenas no sucesso
+                print(f"\n💰 === TRADE REALIZADO [{time.strftime('%H:%M:%S')}] ===")
+                print(f"   Detalhes: {trade}")
+                print(f"   PnL Atual: {pnl_engine.mark_to_market()}")
+                print(f"   Carteira: {wallet.snapshot()}")
+                print("==========================================\n")
+            
+            else:
+                # FALHA NA EXECUÇÃO
+                print(f"\n⚠️  FALHA DE EXECUÇÃO [{time.strftime('%H:%M:%S')}]")
+                print(f"   Intenção: {intent}")
+                print(f"   Motivo: Liquidez insuficiente ou erro no PaperTrader\n")
 
-                print("💰 TRADE:", trade)
-                print("📦 INVENTORY:", inventory.snapshot())
-                print("💼 WALLET:", wallet.snapshot())
-
+        # 2. Avalia Hedge (Proteção)
         hedge_intent = hedge_engine.evaluate()
 
         if hedge_intent:
@@ -98,14 +129,16 @@ if __name__ == "__main__":
                     side=hedge_trade["side"],
                     qty=hedge_trade["filled_qty"]
                 )
-
                 stats.record_trade(hedge_trade)
 
-                print("🛡️ HEDGE:", hedge_trade)
+                print(f"\n🛡️ === HEDGE REALIZADO [{time.strftime('%H:%M:%S')}] ===")
+                print(f"   Detalhes: {hedge_trade}")
+                print(f"   Net BTC: {inventory.net_btc()}")
+                print("==========================================\n")
 
-        pnl = pnl_engine.mark_to_market()
-        print("📊 PnL MTM:", pnl)
-        print("📈 NET BTC:", inventory.net_btc())
-        print("📈 STATS:", stats.snapshot())
+        # 3. Heartbeat (Sinal de vida a cada 30 segundos)
+        if time.time() - last_heartbeat > 30:
+            print(f"⏳ Bot rodando... buscando oportunidades... [{time.strftime('%H:%M:%S')}]")
+            last_heartbeat = time.time()
 
         time.sleep(0.2)

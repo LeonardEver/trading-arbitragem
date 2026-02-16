@@ -4,11 +4,16 @@ from core.price_store import price_store
 class MakerSpreadEngine:
     def __init__(
         self,
-        maker_offset_pct=0.00002,   # 0.01% fora do best
-        fees_pct=0.0004            # maker fee média
+        maker_offset_pct=0.0002,
+        fees=None
     ):
         self.maker_offset_pct = maker_offset_pct
-        self.fees_pct = fees_pct
+        self.fees = fees or {
+            "default": {"maker": 0.001, "taker": 0.001}
+        }
+
+    def get_fee(self, exchange: str, side: str):
+        return self.fees.get(exchange, self.fees["default"])[side]
 
     def find_opportunities(self, symbol: str):
         prices = price_store.get_prices(symbol)
@@ -26,17 +31,20 @@ class MakerSpreadEngine:
                 buy_book = prices[buy_ex]
                 sell_book = prices[sell_ex]
 
-                best_bid = buy_book["bid"]
-                best_ask = sell_book["ask"]
+                best_ask = buy_book["ask"]   # comprar
+                best_bid = sell_book["bid"]  # vender
 
-                # Preços MAKER
-                maker_buy_price = best_bid * (1 - self.maker_offset_pct)
-                maker_sell_price = best_ask * (1 + self.maker_offset_pct)
+
+                maker_buy_price = best_ask * (1 - self.maker_offset_pct)
+                maker_sell_price = best_bid * (1 + self.maker_offset_pct)
 
                 spread_abs = maker_sell_price - maker_buy_price
                 spread_pct = spread_abs / maker_buy_price
 
-                net_spread = spread_pct - (2 * self.fees_pct)
+                buy_fee = self.get_fee(buy_ex, "maker")
+                sell_fee = self.get_fee(sell_ex, "maker")
+
+                net_spread = spread_pct - (buy_fee + sell_fee)
 
                 if net_spread <= 0:
                     continue
@@ -45,11 +53,9 @@ class MakerSpreadEngine:
                     "symbol": symbol,
                     "buy_exchange": buy_ex,
                     "sell_exchange": sell_ex,
-                    "maker_buy_price": round(maker_buy_price, 2),
-                    "maker_sell_price": round(maker_sell_price, 2),
-                    "spread_abs": round(spread_abs, 2),
+                    "net_spread": net_spread,
                     "spread_pct": spread_pct,
-                    "net_spread": net_spread
+                    "fees_total": buy_fee + sell_fee,
                 })
 
         return opportunities
