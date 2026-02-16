@@ -6,6 +6,20 @@ class OrderBook:
             "COINBASE": {"bids": [], "asks": []},
         }
 
+    def get_price(self, exchange, side):
+            exchange = exchange.upper()
+            # Mapeia 'bid' -> 'bids' e 'ask' -> 'asks' se necessário
+            if not side.endswith("s"):
+                side += "s"
+                
+            if exchange in self.books:
+                # Pega a lista de ordens (ex: [(98000.0, 0.5)])
+                orders = self.books[exchange].get(side)
+                if orders and len(orders) > 0:
+                    # Retorna o preço (primeiro item da primeira tupla)
+                    return orders[0][0]
+            return None
+
     def update(self, exchange, bid, ask, bid_qty=1.0, ask_qty=1.0):
         self.books[exchange]["bids"] = [(float(bid), float(bid_qty))]
         self.books[exchange]["asks"] = [(float(ask), float(ask_qty))]

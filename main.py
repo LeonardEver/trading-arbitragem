@@ -71,74 +71,84 @@ if __name__ == "__main__":
     # ======================
     last_heartbeat = time.time()
 
-    while True:
-        # --- SINCRONIZAÇÃO PRICE_STORE -> ORDERBOOK ---
-        # (Mantendo a correção que fizemos antes)
+while True:
+        # ============================================================
+        # 🔄 1. SINCRONIZAÇÃO (A PONTE QUE FALTAVA)
+        # ============================================================
+        # Pega os dados frescos dos WebSockets
         snapshot = price_store.get_snapshot()
+        
+        # Se tiver dados de BTCUSDT, injeta no OrderBook
         if "BTCUSDT" in snapshot:
             for exchange_name, data in snapshot["BTCUSDT"].items():
                 ex_upper = exchange_name.upper()
+                # Atualiza apenas as exchanges conhecidas
                 if ex_upper in ["BINANCE", "BYBIT", "COINBASE"]:
                     orderbook.update(
                         exchange=ex_upper,
                         bid=data['bid'],
                         ask=data['ask'],
-                        bid_qty=0.5,
+                        bid_qty=0.5,  # Liquidez simulada
                         ask_qty=0.5
                     )
-        # -----------------------------------------------
+        # ============================================================
 
-        # 1. Avalia Arbitragem
+# 🔍 2. RAIO-X DE PREÇOS (DEBUG COMPLETO)
+        try:
+            b_bid = orderbook.get_price("BINANCE", "bid")
+            b_ask = orderbook.get_price("BINANCE", "ask")
+            by_bid = orderbook.get_price("BYBIT", "bid")
+            by_ask = orderbook.get_price("BYBIT", "ask")
+
+            # Verifica se temos TODOS os preços necessários
+            if b_bid and b_ask and by_bid and by_ask:
+                
+                # --- LADO A: Vende Binance / Compra Bybit ---
+                spread_1 = (b_bid / by_ask) - 1
+                
+                # --- LADO B: Vende Bybit / Compra Binance ---
+                spread_2 = (by_bid / b_ask) - 1
+
+                # Imprime se houver QUALQUER spread positivo (mesmo 0.0001%)
+                # ou se o spread for negativo mas próximo de zero, só pra confirmar que está lendo
+                if spread_1 > 0:
+                    print(f"👀 OPP A (Vende Bin): Bin {b_bid:.2f} > Byb {by_ask:.2f} | Lucro Bruto: {spread_1*100:.4f}%")
+                
+                if spread_2 > 0:
+                    print(f"👀 OPP B (Vende Byb): Byb {by_bid:.2f} > Bin {b_ask:.2f} | Lucro Bruto: {spread_2*100:.4f}%")
+
+            else:
+                # Se cair aqui, o OrderBook ainda está vazio em alguma ponta
+                # Isso ajuda a saber se uma das corretoras caiu
+                print(f"⚠️ AGUARDANDO DADOS... Bin: {b_bid}/{b_ask} | Byb: {by_bid}/{by_ask}")
+
+        except Exception as e:
+            print(f"Erro no Debug: {e}")
+
+        
+        # 3. Lógica Original do Bot (Arbitragem)
         intent = engine.evaluate()
 
         if intent:
-            # Tenta executar
             trade = trader.handle_intent(intent)
-
             if trade:
-                # SUCESSO
-                inventory.apply_trade(
-                    exchange=trade["exchange"],
-                    side=trade["side"],
-                    qty=trade["filled_qty"]
-                )
+                inventory.apply_trade(trade["exchange"], trade["side"], trade["filled_qty"])
                 stats.record_trade(trade)
-                
-                # Imprime Detalhes COMPLETOS apenas no sucesso
-                print(f"\n💰 === TRADE REALIZADO [{time.strftime('%H:%M:%S')}] ===")
-                print(f"   Detalhes: {trade}")
-                print(f"   PnL Atual: {pnl_engine.mark_to_market()}")
-                print(f"   Carteira: {wallet.snapshot()}")
-                print("==========================================\n")
-            
-            else:
-                # FALHA NA EXECUÇÃO
-                print(f"\n⚠️  FALHA DE EXECUÇÃO [{time.strftime('%H:%M:%S')}]")
-                print(f"   Intenção: {intent}")
-                print(f"   Motivo: Liquidez insuficiente ou erro no PaperTrader\n")
+                print(f"\n💰 TRADE EXECUTADO: {trade}")
+                print(f"   PnL: {pnl_engine.mark_to_market()}")
 
-        # 2. Avalia Hedge (Proteção)
+        # 4. Lógica de Hedge
         hedge_intent = hedge_engine.evaluate()
-
         if hedge_intent:
             hedge_trade = trader.handle_intent(hedge_intent)
-
             if hedge_trade:
-                inventory.apply_trade(
-                    exchange=hedge_trade["exchange"],
-                    side=hedge_trade["side"],
-                    qty=hedge_trade["filled_qty"]
-                )
+                inventory.apply_trade(hedge_trade["exchange"], hedge_trade["side"], hedge_trade["filled_qty"])
                 stats.record_trade(hedge_trade)
+                print(f"\n🛡️ HEDGE EXECUTADO: {hedge_trade}")
 
-                print(f"\n🛡️ === HEDGE REALIZADO [{time.strftime('%H:%M:%S')}] ===")
-                print(f"   Detalhes: {hedge_trade}")
-                print(f"   Net BTC: {inventory.net_btc()}")
-                print("==========================================\n")
-
-        # 3. Heartbeat (Sinal de vida a cada 30 segundos)
+        # 5. Heartbeat (Sinal de vida a cada 30s)
         if time.time() - last_heartbeat > 30:
-            print(f"⏳ Bot rodando... buscando oportunidades... [{time.strftime('%H:%M:%S')}]")
+            print(f"⏳ Bot rodando... [Sync OK] [{time.strftime('%H:%M:%S')}]")
             last_heartbeat = time.time()
 
         time.sleep(0.2)

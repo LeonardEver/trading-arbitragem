@@ -7,8 +7,8 @@ import sys
 
 from core.price_store import price_store
 
-TESTNET_URL = "wss://testnet.binance.vision/ws/btcusdt@bookTicker"
-PROD_URL = "wss://stream.binance.com:9443/ws/btcusdt@bookTicker"
+TESTNET_URL = "wss://ftestnet.binance.vision/ws/btcusdt@bookTicker"
+PROD_URL = "wss://fstream.binance.com:9443/ws/btcusdt@bookTicker"
 
 SYMBOL = "BTCUSDT"
 EXCHANGE = "binance"
