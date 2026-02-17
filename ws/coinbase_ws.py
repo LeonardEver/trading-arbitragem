@@ -2,7 +2,7 @@
 import json
 import ssl
 import websocket
-from core.price_store import price_store  # Importa o PriceStore
+from core.price_store import price_store
 
 # URLs de conexão
 SANDBOX = "wss://ws-feed-public.sandbox.exchange.coinbase.com"

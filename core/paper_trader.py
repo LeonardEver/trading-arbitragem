@@ -37,34 +37,33 @@ class PaperTrader:
     # TAKER
     # =========================
     def _execute_taker(self, intent):
-        exchange = intent["exchange"]
-        side = intent["side"]
-        qty = intent["qty"]
+            # ... (código anterior de pegar preço e qty mantém igual) ...
+            
+            avg_price, filled_qty = self.orderbook.simulate_market_order(exchange, side, qty)
 
-        avg_price, filled_qty = self.orderbook.simulate_market_order(
-            exchange, side, qty
+            if filled_qty <= 0: return None
+
+            # MUDANÇA AQUI: Passamos o preço para o Inventory calcular Posição
+            # Nota: self.wallet aqui deve ser referenciado ao seu Inventory atualizado
+            # Se você estiver usando a classe Wallet separada, ignore, mas idealmente use o Inventory
+            
+            # Vamos assumir que self.wallet aqui é o objeto Inventory modificado acima:
+            self.wallet.apply_trade(
+                        exchange=exchange,
+                        side=side,
+                        price=avg_price, # <--- A ordem desses argumentos pode estar errada ou nomeada incorretamente
+                        qty=filled_qty
         )
 
-        if filled_qty <= 0:
-            return None
-
-        self.wallet.apply_trade(
-            exchange=exchange,
-            side=side,
-            price=avg_price,
-            qty=filled_qty
-        )
-
-        return {
-            "status": "filled",
-            "mode": "taker",
-            "exchange": exchange,
-            "side": side,
-            "avg_price": avg_price,
-            "filled_qty": filled_qty,
-            "requested_qty": qty,
-            "slippage": 0
-        }
+            return {
+                "status": "filled",
+                "mode": "taker",
+                "exchange": exchange,
+                "side": side, # buy=LONG, sell=SHORT
+                "avg_price": avg_price,
+                "filled_qty": filled_qty,
+                "type": "futures_entry" # Tag para log
+            }
 
     # =========================
     # MAKER COM PARTIAL

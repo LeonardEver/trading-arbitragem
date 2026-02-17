@@ -4,6 +4,7 @@ import time
 from ws.binance_ws import start_binance_ws
 from ws.bybit_ws import start_bybit_ws
 from ws.coinbase_ws import start_coinbase_ws
+from ws.kucoin_ws import start_kucoin_ws
 
 from core.arbitrage_engine import ArbitrageEngine
 from core.paper_trader import PaperTrader
@@ -13,7 +14,7 @@ from simulator.wallet import Wallet
 from core.pnl_engine import PnLEngine
 from core.orderbook import OrderBook
 from core.stats_engine import StatsEngine
-from core.price_store import price_store
+from core.price_store import PriceStore, price_store
 
 
 
@@ -41,6 +42,7 @@ if __name__ == "__main__":
     run_ws(start_binance_ws, daemon=True)
     run_ws(start_bybit_ws, daemon=True)
     run_ws(start_coinbase_ws, daemon=False)
+    run_ws(start_kucoin_ws, daemon=True)
 
     time.sleep(3)
 
@@ -49,7 +51,7 @@ if __name__ == "__main__":
     # ======================
     engine = ArbitrageEngine(
         symbol="BTCUSDT",
-        min_net_spread=0.000001,
+        min_net_spread=0.002,
         cooldown_seconds=1
     )
 
@@ -83,7 +85,7 @@ while True:
             for exchange_name, data in snapshot["BTCUSDT"].items():
                 ex_upper = exchange_name.upper()
                 # Atualiza apenas as exchanges conhecidas
-                if ex_upper in ["BINANCE", "BYBIT", "COINBASE"]:
+                if ex_upper in ["BINANCE", "BYBIT", "COINBASE", "KUCOIN"]:
                     orderbook.update(
                         exchange=ex_upper,
                         bid=data['bid'],
@@ -99,8 +101,17 @@ while True:
             b_ask = orderbook.get_price("BINANCE", "ask")
             by_bid = orderbook.get_price("BYBIT", "bid")
             by_ask = orderbook.get_price("BYBIT", "ask")
+            k_bid = orderbook.get_price("KUCOIN", "bid") # <--- Novo
+            k_ask = orderbook.get_price("KUCOIN", "ask")
 
-            # Verifica se temos TODOS os preços necessários
+            # Imprime Kucoin se tiver dados
+            if k_bid:
+                # Compara Kucoin x Binance
+                spread_k = (k_bid / b_ask) - 1 if b_ask else 0
+                if spread_k > 0:
+                    print(f"👀 OPP K (Vende Kuc): Kuc {k_bid:.2f} > Bin {b_ask:.2f} | Lucro Bruto: {spread_k*100:.4f}%")
+
+            # Verifica se temos TODOS os preços necessários 
             if b_bid and b_ask and by_bid and by_ask:
                 
                 # --- LADO A: Vende Binance / Compra Bybit ---

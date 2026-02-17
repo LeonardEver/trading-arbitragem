@@ -4,15 +4,25 @@ class HedgeEngine:
         self.orderbook = orderbook
         self.max_net_btc = max_net_btc
 
-    def evaluate(self):
-        net_btc = self.inventory.net_btc()
+# Em core/hedge_engine.py
 
-        if abs(net_btc) <= self.max_net_btc:
+    def evaluate(self):
+        # MUDANÇA AQUI: De net_btc() para net_exposure()
+        net_exposure = self.inventory.net_exposure()
+
+        # Se a exposição for pequena (neutra), não faz nada
+        if abs(net_exposure) <= self.max_net_btc:
             return None
 
-        side = "sell" if net_btc > 0 else "buy"
-        exchange = "BINANCE"  # mais líquida
-        price = self.orderbook.best_price(exchange, side)
+        # Se estamos expostos, precisamos fazer o contrário para zerar
+        # Se net > 0 (estamos comprados), precisamos VENDER (Shortar)
+        side = "sell" if net_exposure > 0 else "buy"
+        
+        # Escolhe a exchange mais líquida para desovar o risco (ex: Binance)
+        exchange = "BINANCE"
+        
+        # Pega o preço para a ordem
+        price = self.orderbook.get_price(exchange, "bid" if side == "sell" else "ask")
 
         if price is None:
             return None
@@ -22,5 +32,5 @@ class HedgeEngine:
             "exchange": exchange,
             "side": side,
             "price": price,
-            "qty": abs(net_btc)
+            "qty": abs(net_exposure) # Zera a exposição
         }

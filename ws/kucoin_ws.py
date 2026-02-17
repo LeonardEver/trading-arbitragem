@@ -1,84 +1,90 @@
-# kucoin_ws.py
+# ws/kucoin_ws.py
 import json
 import time
-import sys
 import requests
 import websocket
-import ssl
-from urllib.parse import urljoin
+import threading
+from core.price_store import price_store
 
-# escolha sandbox ou prod
-KUCOIN_SANDBOX_REST = "https://openapi-sandbox.kucoin.com"
-KUCOIN_PROD_REST = "https://api.kucoin.com"
+# KuCoin exige um "token" via HTTP antes de conectar no WS
+HTTP_ENDPOINT = "https://api-futures.kucoin.com/api/v1/bullet-public"
+SYMBOL_KUCOIN = "XBTUSDTM"  # Nome na KuCoin
+SYMBOL_INTERNAL = "BTCUSDT" # Nome no seu Bot
+EXCHANGE_NAME = "kucoin"
 
-# o topic usa o formato SYMBOL com dash: 'BTC-USDT'
-SYMBOL = "BTC-USDT"
-
-def get_bullet_public(rest_base):
-    url = rest_base + "/api/v1/bullet-public"
-    resp = requests.post(url, timeout=5)
-    resp.raise_for_status()
-    return resp.json()["data"]
+def get_ws_token():
+    """Busca o token dinâmico e o endpoint para conexão"""
+    try:
+        response = requests.post(HTTP_ENDPOINT)
+        data = response.json()
+        if data['code'] == '200000':
+            token = data['data']['token']
+            endpoint = data['data']['instanceServers'][0]['endpoint']
+            return token, endpoint
+    except Exception as e:
+        print(f"⚠️ Erro ao obter token KuCoin: {e}")
+    return None, None
 
 def on_open(ws):
-    print("✅ Conectado à KuCoin WS (on_open)")
-    # subscribe Level1 topic
-    sub = {
-        "id": int(time.time() * 1000),
+    print(f"✅ Conectado (on_open) à KuCoin Futures ({SYMBOL_KUCOIN})")
+    # Mensagem de inscrição (Ticker V2 é mais rápido)
+    subscribe_msg = {
+        "id": 1,
         "type": "subscribe",
-        "topic": f"/spotMarket/level1:{SYMBOL}",
+        "topic": f"/contractMarket/tickerV2:{SYMBOL_KUCOIN}", 
         "response": True
     }
-    ws.send(json.dumps(sub))
+    ws.send(json.dumps(subscribe_msg))
 
 def on_message(ws, message):
     try:
         data = json.loads(message)
-    except Exception:
-        print("Raw:", message)
-        return
+        
+        # O formato da mensagem de ticker da KuCoin é:
+        # data: { "bestBidPrice": "...", "bestAskPrice": "..." }
+        if data.get('type') == 'message' and 'data' in data:
+            ticker = data['data']
+            bid = float(ticker.get('bestBidPrice', 0))
+            ask = float(ticker.get('bestAskPrice', 0))
 
-    # Mensagens Level1 têm 'subject' ou 'type' com dados em 'data'
-    if data.get("topic") and data.get("data"):
-        d = data["data"]
-        # KuCoin Level1 data fields: bestBidPrice / bestAskPrice or 'bestBid' e 'bestAsk' dependendo da versão
-        bid = d.get("bestBidPrice") or d.get("bestBid")
-        ask = d.get("bestAskPrice") or d.get("bestAsk")
-        if bid and ask:
-            print(f"[KUCOIN] Bid: {bid} | Ask: {ask}")
-    elif data.get("type") == "ack":
-        print("[KUCOIN] subscribe ack:", data)
+            if bid > 0 and ask > 0:
+                price_store.update_price(
+                    exchange=EXCHANGE_NAME,
+                    symbol=SYMBOL_INTERNAL,
+                    bid=bid,
+                    ask=ask
+                )
+    except Exception as e:
+        pass
 
 def on_error(ws, error):
-    print("❌ KuCoin WS error:", error)
+    print(f"❌ KuCoin WS Error: {error}")
 
-def on_close(ws, code, reason):
-    print("🔒 KuCoin closed:", code, reason)
+def on_close(ws, c, m):
+    print("🔒 KuCoin WS Closed")
 
-if __name__ == "__main__":
-    rest = KUCOIN_SANDBOX_REST
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "prod":
-        rest = KUCOIN_PROD_REST
+def start_kucoin_daemon():
+    """Função que gerencia a conexão e reconexão"""
+    while True:
+        token, endpoint = get_ws_token()
+        if token and endpoint:
+            # Monta a URL com o token
+            connect_url = f"{endpoint}?token={token}"
+            
+            ws = websocket.WebSocketApp(
+                connect_url,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close
+            )
+            ws.run_forever(ping_interval=20, ping_timeout=10)
+        
+        print("⚠️ Tentando reconectar KuCoin em 10s...")
+        time.sleep(10)
 
-    print("Obtendo token bullet-public via REST:", rest + "/api/v1/bullet-public")
-    try:
-        info = get_bullet_public(rest)
-    except Exception as e:
-        print("Erro ao obter token:", e)
-        raise SystemExit(1)
-
-    # info deve conter 'instanceServers' (lista) e 'token'
-    instance = info["instanceServers"][0]
-    endpoint = instance["endpoint"]
-    token = info["token"]
-
-    # montar URL final — muitas vezes endpoint já precisa do token como query, mas normalmente conectar e mandar subscribe funciona diretamente.
-    ws_url = endpoint
-    print("Conectar WS KuCoin endpoint:", ws_url)
-    ws = websocket.WebSocketApp(ws_url,
-                                on_open=on_open,
-                                on_message=on_message,
-                                on_error=on_error,
-                                on_close=on_close)
-    # pingInterval / pingTimeout são informados no response; vamos usar ssl opt
-    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+def start_kucoin_ws():
+    # Roda em thread separada para não travar o main
+    t = threading.Thread(target=start_kucoin_daemon, daemon=True)
+    t.start()
+    return t
